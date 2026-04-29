@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 98%;
+    --foreground: 230 25% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 230 25% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 230 25% 12%;
+
+    --primary: 262 80% 56%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 280 90% 70%;
+
+    --secondary: 230 15% 95%;
+    --secondary-foreground: 230 25% 18%;
+
+    --muted: 230 15% 95%;
+    --muted-foreground: 230 12% 45%;
+
+    --accent: 175 80% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 65% 42%;
+    --warning: 38 92% 55%;
+
+    --border: 230 15% 90%;
+    --input: 230 15% 90%;
+    --ring: 262 80% 56%;
+
+    --radius: 0.85rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(262 80% 56%), hsl(280 90% 70%));
+    --gradient-accent: linear-gradient(135deg, hsl(175 80% 45%), hsl(195 85% 55%));
+    --gradient-hero: radial-gradient(ellipse at top, hsl(262 80% 56% / 0.15), transparent 60%),
+                     radial-gradient(ellipse at bottom right, hsl(175 80% 45% / 0.12), transparent 60%);
+    --gradient-mesh: linear-gradient(135deg, hsl(262 80% 56% / 0.08), hsl(175 80% 45% / 0.08));
+
+    --shadow-sm: 0 1px 2px hsl(230 25% 12% / 0.06);
+    --shadow-md: 0 4px 16px hsl(230 25% 12% / 0.08);
+    --shadow-lg: 0 16px 48px hsl(262 80% 56% / 0.18);
+    --shadow-glow: 0 0 40px hsl(262 80% 56% / 0.35);
+
+    --sidebar-background: 230 18% 97%;
+    --sidebar-foreground: 230 25% 18%;
+    --sidebar-primary: 262 80% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 230 15% 92%;
+    --sidebar-accent-foreground: 230 25% 18%;
+    --sidebar-border: 230 15% 88%;
+    --sidebar-ring: 262 80% 56%;
+  }
+
+  .dark {
+    --background: 230 25% 7%;
+    --foreground: 230 15% 95%;
+
+    --card: 230 25% 10%;
+    --card-foreground: 230 15% 95%;
+
+    --popover: 230 25% 10%;
+    --popover-foreground: 230 15% 95%;
+
+    --primary: 270 90% 70%;
+    --primary-foreground: 230 25% 7%;
+    --primary-glow: 285 95% 75%;
+
+    --secondary: 230 20% 15%;
+    --secondary-foreground: 230 15% 95%;
+
+    --muted: 230 20% 15%;
+    --muted-foreground: 230 12% 65%;
+
+    --accent: 175 80% 55%;
+    --accent-foreground: 230 25% 7%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 60% 50%;
+    --warning: 38 95% 60%;
+
+    --border: 230 20% 18%;
+    --input: 230 20% 18%;
+    --ring: 270 90% 70%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(270 90% 70%), hsl(285 95% 75%));
+    --gradient-accent: linear-gradient(135deg, hsl(175 80% 55%), hsl(195 85% 60%));
+    --gradient-hero: radial-gradient(ellipse at top, hsl(270 90% 70% / 0.18), transparent 60%),
+                     radial-gradient(ellipse at bottom right, hsl(175 80% 55% / 0.12), transparent 60%);
+    --gradient-mesh: linear-gradient(135deg, hsl(270 90% 70% / 0.1), hsl(175 80% 55% / 0.08));
+
+    --shadow-glow: 0 0 50px hsl(270 90% 70% / 0.45);
+
+    --sidebar-background: 230 25% 9%;
+    --sidebar-foreground: 230 15% 90%;
+    --sidebar-primary: 270 90% 70%;
+    --sidebar-primary-foreground: 230 25% 7%;
+    --sidebar-accent: 230 20% 14%;
+    --sidebar-accent-foreground: 230 15% 95%;
+    --sidebar-border: 230 20% 16%;
+    --sidebar-ring: 270 90% 70%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@layer utilities {
+  .bg-gradient-primary { background: var(--gradient-primary); }
+  .bg-gradient-accent { background: var(--gradient-accent); }
+  .bg-gradient-hero { background: var(--gradient-hero); }
+  .bg-gradient-mesh { background: var(--gradient-mesh); }
+  .text-gradient-primary {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .shadow-glow { box-shadow: var(--shadow-glow); }
+  .shadow-elegant { box-shadow: var(--shadow-lg); }
+  .font-display { font-family: 'Space Grotesk', system-ui, sans-serif; }
+}
