@@ -1,6 +1,6 @@
-# Assistiverse-ai
+# Shop-ai
 
-Assistiverse-ai is an AI shopping assistant designed to reduce decision fatigue in e-commerce.  
+Shop-ai is an AI shopping assistant designed to reduce decision fatigue in e-commerce.  
 Instead of relying on static filters and keyword search, it uses a single supervisor agent with tool-based modes for search, recommendation, comparison, and review analysis to deliver practical product results with images, ratings, and purchase links.
 
 ## Introduction
