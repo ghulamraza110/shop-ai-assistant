@@ -13,6 +13,12 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     history: list[ChatMessage] = Field(default_factory=list)
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="Conversation thread ID for checkpointer memory. "
+        "If provided, the graph will resume from the last checkpoint "
+        "for this thread, enabling follow-up questions.",
+    )
 class Product(BaseModel):
     name: str
     brand: Optional[str] = None

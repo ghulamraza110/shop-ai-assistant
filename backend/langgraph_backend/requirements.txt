@@ -6,3 +6,5 @@ langchain-openai
 pydantic
 python-dotenv
 requests
+langgraph-checkpoint-postgres
+psycopg[binary,pool]

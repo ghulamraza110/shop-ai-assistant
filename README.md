@@ -6,7 +6,7 @@ Instead of relying on static filters and keyword search, it uses a single superv
 ## Introduction
 
 E-commerce platforms often overwhelm users with too many options. Traditional systems are mostly static and do not reason across multiple constraints.  
-Assistiverse-ai addresses this by mimicking human-like decision-making with a structured, tool-driven agent workflow.
+Shop-ai addresses this by mimicking human-like decision-making with a structured, tool-driven agent workflow.
 
 ## Problem Statement
 
@@ -24,7 +24,7 @@ Existing systems commonly miss:
 
 ## Objectives
 
-Assistiverse-ai aims to:
+Shop-ai aims to:
 - Build a tool-driven shopping assistant
 - Use structured orchestration and shared state
 - Provide product search via web APIs/scraping

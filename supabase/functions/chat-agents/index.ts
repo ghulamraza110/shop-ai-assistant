@@ -22,19 +22,22 @@ const MODE_LABELS: Record<
   review_analysis: "Review Analysis",
   chitchat: "Chitchat",
 };
-async function callLangGraph(message: string, history: Array<{ role: string; content: string }>) {
+async function callLangGraph(
+  message: string,
+  history: Array<{ role: string; content: string }>,
+  thread_id?: string,
+) {
   if (!LANGGRAPH_BACKEND_URL) throw new Error("LANGGRAPH_URL_NOT_CONFIGURED");
   const base = LANGGRAPH_BACKEND_URL.replace(/\/+$/, "");
   let response: Response;
   try {
     response = await fetch(`${base}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       headers: {
         "Content-Type": "application/json",
         "ngrok-skip-browser-warning": "true"
       },
-      body: JSON.stringify({ message, history }),
+      body: JSON.stringify({ message, history, thread_id }),
     });
   } catch (_err) {
     throw new Error("LANGGRAPH_UNREACHABLE");
@@ -93,7 +96,7 @@ Deno.serve(async (req) => {
       content: m.content,
     }));
     // --- LANGGRAPH BACKEND CALL ---
-    const result = await callLangGraph(message, context);
+    const result = await callLangGraph(message, context, convId);
     const content = result.content ?? "Here's what I found:";
     const agentKey = (result.mode ??
       "product_search") as keyof typeof MODE_LABELS;

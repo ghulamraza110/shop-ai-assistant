@@ -1,15 +1,21 @@
 import os
-from typing import Any, Literal, TypedDict
+from pathlib import Path
+from typing import Annotated, Any, Literal, TypedDict
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.postgres import PostgresSaver
+import psycopg
+from psycopg.rows import dict_row
 from .models import Product, ProductResponse, RouterDecision
 from .tools import apply_budget_filter, extract_budget, search_products_serpapi
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 class GraphState(TypedDict, total=False):
     query: str
     history: list[dict[str, str]]
+    messages: Annotated[list, add_messages]  # checkpointer accumulates messages
     mode: Literal[
         "product_search",
         "price_compare",
@@ -28,14 +34,23 @@ def _llm() -> ChatOpenAI:
         temperature=0.2,
     )
 def _build_messages(state: GraphState, system_prompt: str):
-    messages = [SystemMessage(content=system_prompt)]
-    for item in state.get("history", [])[-10:]:
-        if item["role"] == "assistant":
-            messages.append(AIMessage(content=item["content"]))
-        else:
-            messages.append(HumanMessage(content=item["content"]))
-    messages.append(HumanMessage(content=state["query"]))
-    return messages
+    msgs = [SystemMessage(content=system_prompt)]
+    # Prefer checkpointed messages (accumulated across turns by MemorySaver).
+    # Fall back to frontend-passed history for backwards compatibility.
+    checkpointed = state.get("messages", [])
+    if len(checkpointed) > 1:
+        # checkpointed already contains all prior turns + current HumanMessage
+        # Take the last 20 messages for context window management
+        msgs.extend(checkpointed[-20:])
+    else:
+        # Fallback: use history from frontend payload
+        for item in state.get("history", [])[-10:]:
+            if item["role"] == "assistant":
+                msgs.append(AIMessage(content=item["content"]))
+            else:
+                msgs.append(HumanMessage(content=item["content"]))
+        msgs.append(HumanMessage(content=state["query"]))
+    return msgs
 def _norm(text: str) -> str:
     return "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in text)
 def _token_overlap_score(a: str, b: str) -> float:
@@ -71,7 +86,11 @@ def chitchat_node(state: GraphState) -> GraphState:
             "You are a friendly shopping assistant. Keep it short and invite product queries.",
         )
     )
-    return {"content": reply.content, "products": []}
+    return {
+        "content": reply.content,
+        "products": [],
+        "messages": [AIMessage(content=reply.content)],
+    }
 def products_node(state: GraphState) -> GraphState:
     mode = state["mode"]
     query_text = state.get("query", "")
@@ -105,10 +124,12 @@ def products_node(state: GraphState) -> GraphState:
         for idx, product in enumerate(top, start=1):
             if product.purchase_url:
                 intro_lines.append(f"{idx}. {product.name}: {product.purchase_url}")
+        reply_text = "\n".join(intro_lines)
         return {
-            "content": "\n".join(intro_lines),
+            "content": reply_text,
             "products": [p.model_dump() for p in top],
             "search_context": search_context,
+            "messages": [AIMessage(content=reply_text)],
         }
     structured = _llm().with_structured_output(ProductResponse)
     result = structured.invoke(
@@ -181,6 +202,7 @@ When search evidence exists, prefer those products and preserve image_url/purcha
         "content": content,
         "products": [p.model_dump() for p in final_products],
         "search_context": search_context,
+        "messages": [AIMessage(content=content)],
     }
 def budget_node(state: GraphState) -> GraphState:
     budget = extract_budget(state["query"])
@@ -193,6 +215,27 @@ def budget_node(state: GraphState) -> GraphState:
     return {"products": [p.model_dump() for p in filtered]}
 def should_chitchat(state: GraphState) -> str:
     return "chitchat" if state.get("mode") == "chitchat" else "products"
+# Persistent PostgreSQL checkpointer using Supabase.
+# Each thread_id gets its own conversation state, so follow-up
+# questions automatically have access to prior context.
+# Data survives server restarts.
+_db_url = os.getenv("DATABASE_URL", "")
+if not _db_url:
+    raise RuntimeError(
+        "DATABASE_URL env var is required for persistent checkpointer. "
+        "Set it to your Supabase Postgres connection string."
+    )
+
+_conn = psycopg.Connection.connect(
+    _db_url,
+    autocommit=True,
+    row_factory=dict_row,
+    prepare_threshold=None,  # Disable prepared statements (required for Supabase pooler)
+)
+checkpointer = PostgresSaver(conn=_conn)
+# Create checkpoint tables if they don't exist yet.
+checkpointer.setup()
+
 def build_graph():
     graph = StateGraph(GraphState)
     graph.add_node("route", route_node)
@@ -208,5 +251,5 @@ def build_graph():
     graph.add_edge("products", "budget")
     graph.add_edge("budget", END)
     graph.add_edge("chitchat", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 assistant_graph = build_graph()
