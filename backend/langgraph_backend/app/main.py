@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage
 from .graph import assistant_graph
 from .models import ChatRequest, FinalResponse
 
-app = FastAPI(title="Assistiverse LangGraph Backend", version="0.1.0")
+app = FastAPI(title="ShopAI Backend", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
