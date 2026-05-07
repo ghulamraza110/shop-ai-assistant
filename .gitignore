@@ -27,6 +27,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+frontend/.env
+langgraph_backend/.env
+frontend/node_modules/
 
 # Python / FastAPI
 __pycache__/
