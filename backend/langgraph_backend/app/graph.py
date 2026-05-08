@@ -26,6 +26,7 @@ class GraphState(TypedDict, total=False):
     content: str
     products: list[dict[str, Any]]
     search_context: str
+    search_query: str  # standalone query formulated by router for SerpAPI
 def _llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
@@ -226,15 +227,22 @@ if not _db_url:
         "Set it to your Supabase Postgres connection string."
     )
 
-_conn = psycopg.Connection.connect(
-    _db_url,
-    autocommit=True,
-    row_factory=dict_row,
-    prepare_threshold=None,  # Disable prepared statements (required for Supabase pooler)
-)
-checkpointer = PostgresSaver(conn=_conn)
-# Create checkpoint tables if they don't exist yet.
-checkpointer.setup()
+try:
+    _conn = psycopg.Connection.connect(
+        _db_url,
+        autocommit=True,
+        row_factory=dict_row,
+        prepare_threshold=None,  # Disable prepared statements (required for Supabase pooler)
+    )
+    checkpointer = PostgresSaver(conn=_conn)
+    # Create checkpoint tables if they don't exist yet.
+    checkpointer.setup()
+except Exception as exc:
+    import traceback
+    traceback.print_exc()
+    print(f"⚠️  PostgresSaver init failed ({exc}). Falling back to in-memory checkpointer.")
+    from langgraph.checkpoint.memory import MemorySaver
+    checkpointer = MemorySaver()
 
 def build_graph():
     graph = StateGraph(GraphState)
