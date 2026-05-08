@@ -87,7 +87,7 @@ const Dashboard = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4 animate-fade-in-up">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 animate-fade-in-up">
           <StatCard icon={Users} label="Users" value={stats.users} />
           <StatCard icon={MessageSquare} label="Conversations" value={stats.conversations} />
           <StatCard icon={Bot} label="Total messages" value={stats.messages} />

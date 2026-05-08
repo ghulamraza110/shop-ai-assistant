@@ -48,8 +48,63 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [sidebarWidth, setSidebarWidth] = useState(288);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isLargeScreen, setIsLargeScreen] = useState(false);
+
+  useEffect(() => {
+    setIsLargeScreen(window.innerWidth >= 1024);
+    const handleResize = () => setIsLargeScreen(window.innerWidth >= 1024);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const startResizing = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizing) {
+        const newWidth = Math.max(200, Math.min(window.innerWidth * 0.85, e.clientX));
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (isResizing && e.touches[0]) {
+        const newWidth = Math.max(200, Math.min(window.innerWidth * 0.85, e.touches[0].clientX));
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleStopResizing = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleStopResizing);
+      window.addEventListener("touchmove", handleTouchMove, { passive: true });
+      window.addEventListener("touchend", handleStopResizing);
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleStopResizing);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleStopResizing);
+    };
+  }, [isResizing]);
 
   // Auth gate
   useEffect(() => {
@@ -161,24 +216,47 @@ const Chat = () => {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
+      {/* Sidebar Overlay for Mobile */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
+        style={sidebarOpen ? { width: `${sidebarWidth}px` } : undefined}
         className={cn(
-          "flex flex-col border-r border-border/60 bg-sidebar transition-all duration-300",
-          sidebarOpen ? "w-72" : "w-0",
+          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border/60 bg-sidebar lg:static lg:translate-x-0 lg:relative",
+          !isResizing && "transition-transform duration-300 ease-in-out",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:w-0 lg:translate-x-0 overflow-hidden",
         )}
       >
-        <div className={cn("flex flex-col h-full overflow-hidden", !sidebarOpen && "pointer-events-none opacity-0")}>
+        <div 
+          className={cn("flex flex-col h-full overflow-hidden w-full relative", !sidebarOpen && "pointer-events-none opacity-0 lg:pointer-events-auto lg:opacity-100")}
+        >
           <div className="p-3">
-            <Link to="/" className="mb-3 flex items-center gap-2 px-2 py-1">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-primary">
-                <Sparkles className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <span className="font-display font-bold">
-                Shop<span className="text-gradient-primary">AI</span>
-              </span>
-            </Link>
-            <Button onClick={newChat} className="w-full justify-start gap-2 bg-gradient-primary border-0 hover:opacity-90">
+            <div className="mb-3 flex items-center justify-between">
+              <Link to="/" className="flex items-center gap-2 px-2 py-1">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-primary">
+                  <Sparkles className="h-4 w-4 text-primary-foreground" />
+                </div>
+                <span className="font-display font-bold">
+                  Shop<span className="text-gradient-primary">AI</span>
+                </span>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 lg:hidden text-muted-foreground hover:text-foreground"
+                onClick={() => setSidebarOpen(false)}
+                aria-label="Close sidebar"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            </div>
+            <Button onClick={() => { newChat(); if (window.innerWidth < 1024) setSidebarOpen(false); }} className="w-full justify-start gap-2 bg-gradient-primary border-0 hover:opacity-90">
               <Plus className="h-4 w-4" /> New chat
             </Button>
           </div>
@@ -193,7 +271,7 @@ const Chat = () => {
               {conversations.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => setActiveId(c.id)}
+                  onClick={() => { setActiveId(c.id); if (window.innerWidth < 1024) setSidebarOpen(false); }}
                   className={cn(
                     "group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
                     activeId === c.id
@@ -202,7 +280,9 @@ const Chat = () => {
                   )}
                 >
                   <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                  <span className="flex-1 truncate">{c.title}</span>
+                  <span className="flex-1 break-words text-left text-xs sm:text-sm leading-snug line-clamp-2" title={c.title}>
+                    {c.title}
+                  </span>
                   <Trash2
                     className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity hover:text-destructive"
                     onClick={(e) => { e.stopPropagation(); deleteConv(c.id); }}
@@ -211,6 +291,33 @@ const Chat = () => {
               ))}
             </div>
           </ScrollArea>
+        </div>
+        {/* Sidebar drag handle */}
+        <div
+          onMouseDown={startResizing}
+          onTouchStart={startResizing}
+          className={cn(
+            "absolute top-0 bottom-0 -right-3 w-6 cursor-col-resize z-50 flex items-center justify-center group"
+          )}
+        >
+          {/* Centered grip indicator line (thin line on hover) */}
+          <div className={cn(
+            "absolute inset-y-0 left-1/2 -translate-x-1/2 w-[1px] bg-border transition-colors group-hover:bg-primary/50",
+            isResizing && "bg-primary"
+          )} />
+
+          {/* Centered grip symbol */}
+          <div className={cn(
+            "relative h-10 w-4 rounded-full border border-border/80 bg-background shadow-md flex items-center justify-center transition-all group-hover:scale-110 group-hover:border-primary/50 group-hover:shadow-lg",
+            isResizing && "scale-110 border-primary shadow-glow-sm"
+          )}>
+            <div className="flex flex-col gap-1">
+              <span className="w-1 h-1 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-primary" />
+              <span className="w-1 h-1 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-primary" />
+              <span className="w-1 h-1 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-primary" />
+              <span className="w-1 h-1 rounded-full bg-muted-foreground/60 transition-colors group-hover:bg-primary" />
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -364,7 +471,7 @@ function MessageBubble({ message }: { message: Message }) {
           {message.content}
         </div>
         {message.products && message.products.length > 0 && (
-          <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-2">
+          <div className="grid w-full gap-3 grid-cols-1 sm:grid-cols-2">
             {message.products.map((p, i) => (
               <ProductCard key={i} product={p} index={i} />
             ))}

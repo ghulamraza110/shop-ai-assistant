@@ -26,33 +26,35 @@ export function SiteHeader() {
           </span>
         </Link>
 
-        <nav className="flex items-center gap-1">
+        <nav className="flex items-center gap-1 sm:gap-2">
           {user ? (
             <>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/chat" className="gap-2">
-                  <MessageSquare className="h-4 w-4" /> Chat
+              <Button variant="ghost" size="sm" asChild className="px-2 sm:px-3">
+                <Link to="/chat" className="flex items-center gap-1.5" aria-label="Chat">
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="hidden sm:inline">Chat</span>
                 </Link>
               </Button>
               {isAdmin && (
-                <Button variant="ghost" size="sm" asChild>
-                  <Link to="/dashboard" className="gap-2">
-                    <LayoutDashboard className="h-4 w-4" /> Admin
+                <Button variant="ghost" size="sm" asChild className="px-2 sm:px-3">
+                  <Link to="/dashboard" className="flex items-center gap-1.5" aria-label="Admin Dashboard">
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span className="hidden sm:inline">Admin</span>
                   </Link>
                 </Button>
               )}
               <ThemeToggle />
-              <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
+              <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out" className="h-8 w-8 sm:h-9 sm:w-9">
                 <LogOut className="h-4 w-4" />
               </Button>
             </>
           ) : (
             <>
               <ThemeToggle />
-              <Button variant="ghost" size="sm" asChild>
+              <Button variant="ghost" size="sm" asChild className="px-2 sm:px-3">
                 <Link to="/auth">Sign in</Link>
               </Button>
-              <Button size="sm" asChild className="bg-gradient-primary hover:opacity-90 border-0">
+              <Button size="sm" asChild className="bg-gradient-primary hover:opacity-90 border-0 px-3 sm:px-4">
                 <Link to="/auth?mode=signup">Get started</Link>
               </Button>
             </>

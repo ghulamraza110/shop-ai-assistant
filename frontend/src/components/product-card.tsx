@@ -73,7 +73,7 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
       <p className="mt-3 text-sm text-muted-foreground line-clamp-3">{product.summary}</p>
 
       {(product.pros?.length || product.cons?.length) ? (
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           {product.pros?.length ? (
             <div>
               <p className="font-semibold text-success mb-1">Pros</p>
