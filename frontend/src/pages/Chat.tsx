@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Send, Loader2, Plus, MessageSquare, Trash2, Sparkles, Bot, User as UserIcon,
-  PanelLeftClose, PanelLeftOpen, Search, Scale, MessageSquareQuote,
+  PanelLeftClose, PanelLeftOpen, Search, Scale, MessageSquareQuote, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -233,7 +233,7 @@ const Chat = () => {
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:w-0 lg:translate-x-0 overflow-hidden",
         )}
       >
-        <div 
+        <div
           className={cn("flex flex-col h-full overflow-hidden w-full relative", !sidebarOpen && "pointer-events-none opacity-0 lg:pointer-events-auto lg:opacity-100")}
         >
           <div className="p-3">
@@ -435,10 +435,26 @@ const Chat = () => {
   );
 };
 
+/** Strip markdown formatting characters from content text */
+function cleanContent(text: string): string {
+  return text
+    .replace(/\*+/g, "")            // remove all asterisks
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) -> text
+    .replace(/#{1,6}\s*/g, "")       // remove heading markers
+    .replace(/`/g, "")              // remove backticks
+    .trim();
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   const meta = message.agent ? agentMeta[message.agent] : null;
   const Icon = meta?.icon ?? Bot;
+
+  // Filter products that have a valid purchase url
+  const productsWithLinks = message.products?.filter(p => p.purchase_url && p.purchase_url.startsWith("http")) ?? [];
+
+  // Clean the display content of any markdown symbols
+  const displayContent = isUser ? message.content : cleanContent(message.content);
 
   return (
     <div className={cn("flex items-start gap-3 animate-fade-in", isUser && "flex-row-reverse")}>
@@ -460,15 +476,56 @@ function MessageBubble({ message }: { message: Message }) {
             <span className={meta.color}>●</span> {meta.label} agent
           </div>
         )}
+
+        {/* Instant Purchase Links — shown at top of assistant messages when real direct links are available */}
+        {!isUser && productsWithLinks.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-2xl bg-primary/10 border border-primary/20 p-4 shadow-elegant animate-fade-in-up max-w-[85%]">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-primary">
+                Direct Buy Links
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Tap any product to go directly to the merchant page — no scrolling needed:
+            </p>
+            <div className="flex flex-col gap-2 mt-1">
+              {productsWithLinks.slice(0, 3).map((p, i) => (
+                <Button
+                  key={i}
+                  asChild
+                  className="w-full gap-2 justify-start bg-gradient-primary text-primary-foreground font-semibold hover:opacity-90 shadow-md transition-all duration-300 py-4"
+                >
+                  <a href={p.purchase_url} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    <span className="truncate flex-1 text-left text-sm">{p.name}</span>
+                    <span className="ml-auto bg-primary-foreground/20 px-2.5 py-0.5 rounded text-xs shrink-0 font-bold whitespace-nowrap">
+                      {p.price}
+                    </span>
+                  </a>
+                </Button>
+              ))}
+            </div>
+            {productsWithLinks.length > 3 && (
+              <p className="text-xs text-muted-foreground text-center mt-1">
+                +{productsWithLinks.length - 3} more below ↓
+              </p>
+            )}
+          </div>
+        )}
+
         <div
           className={cn(
-            "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+            "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
             isUser
               ? "bg-gradient-primary text-primary-foreground"
               : "bg-muted text-foreground",
           )}
         >
-          {message.content}
+          {displayContent}
         </div>
         {message.products && message.products.length > 0 && (
           <div className="grid w-full gap-3 grid-cols-1 sm:grid-cols-2">

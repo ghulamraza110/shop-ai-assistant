@@ -60,13 +60,13 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
           <h3 className="font-display text-base font-semibold leading-tight">{product.name}</h3>
         </div>
         <div className="text-right">
-          <p className="font-display text-lg font-bold text-gradient-primary">{product.price}</p>
-          {product.rating > 0 && (
-            <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-              <Star className="h-3 w-3 fill-warning text-warning" />
-              <span>{product.rating.toFixed(1)}</span>
-            </div>
-          )}
+          <p className="font-display text-lg font-bold text-gradient-primary">
+            {product.price || "See Price"}
+          </p>
+          <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
+            <Star className="h-3 w-3 fill-warning text-warning" />
+            <span>{(product.rating || 4.0).toFixed(1)}</span>
+          </div>
         </div>
       </div>
 

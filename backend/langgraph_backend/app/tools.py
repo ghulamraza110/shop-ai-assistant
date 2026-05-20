@@ -8,18 +8,22 @@ from .models import Product
 def extract_budget(query: str) -> Optional[float]:
     q = query.lower()
     patterns = [
-        r"under\s*\$?\s*([\d,]+)(k)?",
-        r"below\s*\$?\s*([\d,]+)(k)?",
-        r"budget\s*\$?\s*([\d,]+)(k)?",
-        r"under\s*rs\.?\s*([\d,]+)(k)?",
-        r"under\s*pkr\s*([\d,]+)(k)?",
+        r"under\s*(?:rs\.?|pkr|\$)?\s*([\d,]+)\s*(k|lacs?|lakhs?|m|millions?)?",
+        r"below\s*(?:rs\.?|pkr|\$)?\s*([\d,]+)\s*(k|lacs?|lakhs?|m|millions?)?",
+        r"budget\s*(?:rs\.?|pkr|\$)?\s*([\d,]+)\s*(k|lacs?|lakhs?|m|millions?)?",
     ]
     for pattern in patterns:
         match = re.search(pattern, q)
         if match:
             val = float(match.group(1).replace(",", ""))
-            if match.group(2) == "k":
-                val *= 1000
+            suffix = match.group(2)
+            if suffix:
+                if suffix == "k":
+                    val *= 1000
+                elif suffix.startswith("lac") or suffix.startswith("lakh"):
+                    val *= 100000
+                elif suffix.startswith("m"):
+                    val *= 1000000
             return val
     return None
 

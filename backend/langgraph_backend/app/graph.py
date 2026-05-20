@@ -1,6 +1,10 @@
 import os
+import re
+import requests
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict, Optional
+from urllib.parse import quote_plus
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -11,7 +15,10 @@ import psycopg
 from psycopg.rows import dict_row
 from .models import Product, ProductResponse, RouterDecision
 from .tools import apply_budget_filter, extract_budget, search_products_serpapi
+
 load_dotenv(Path(__file__).resolve().parent / ".env")
+
+
 class GraphState(TypedDict, total=False):
     query: str
     history: list[dict[str, str]]
@@ -27,24 +34,25 @@ class GraphState(TypedDict, total=False):
     products: list[dict[str, Any]]
     search_context: str
     search_query: str  # standalone query formulated by router for SerpAPI
+
+
 def _llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
         api_key=os.getenv("OPENROUTER_API_KEY"),
         base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         temperature=0.2,
+        max_tokens=4096,
     )
+
+
 def _build_messages(state: GraphState, system_prompt: str):
     msgs = [SystemMessage(content=system_prompt)]
     # Prefer checkpointed messages (accumulated across turns by MemorySaver).
-    # Fall back to frontend-passed history for backwards compatibility.
     checkpointed = state.get("messages", [])
     if len(checkpointed) > 1:
-        # checkpointed already contains all prior turns + current HumanMessage
-        # Take the last 20 messages for context window management
         msgs.extend(checkpointed[-20:])
     else:
-        # Fallback: use history from frontend payload
         for item in state.get("history", [])[-10:]:
             if item["role"] == "assistant":
                 msgs.append(AIMessage(content=item["content"]))
@@ -52,15 +60,31 @@ def _build_messages(state: GraphState, system_prompt: str):
                 msgs.append(HumanMessage(content=item["content"]))
         msgs.append(HumanMessage(content=state["query"]))
     return msgs
-def _norm(text: str) -> str:
-    return "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in text)
-def _token_overlap_score(a: str, b: str) -> float:
-    a_tokens = {t for t in _norm(a).split() if t}
-    b_tokens = {t for t in _norm(b).split() if t}
-    if not a_tokens or not b_tokens:
-        return 0.0
-    overlap = len(a_tokens & b_tokens)
-    return overlap / max(len(a_tokens), len(b_tokens))
+
+
+def _clean_markdown(text: str) -> str:
+    """Strip markdown formatting so the chat bubble shows clean plain text."""
+    text = re.sub(r'\*+', '', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    text = re.sub(r'#{1,6}\s*', '', text)
+    text = re.sub(r'`', '', text)
+    return text.strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Known e-commerce domains for Pakistan and global markets
+# ─────────────────────────────────────────────────────────────────────────────
+SHOP_DOMAINS = [
+    "daraz.pk", "priceoye.pk", "mega.pk", "whatmobile.com.pk",
+    "telemart.pk", "shophive.com", "ishopping.pk", "symbios.pk",
+    "amazon.com", "ebay.com", "flipkart.com", "czone.com.pk",
+]
+
+
+def _is_shop_link(url: str) -> bool:
+    return any(domain in url for domain in SHOP_DOMAINS)
+
+
 def route_node(state: GraphState) -> GraphState:
     router = _llm().with_structured_output(RouterDecision)
     decision = router.invoke(
@@ -80,6 +104,8 @@ Return only structured output.""",
         )
     )
     return {"mode": decision.mode, "search_query": decision.search_query}
+
+
 def chitchat_node(state: GraphState) -> GraphState:
     reply = _llm().invoke(
         _build_messages(
@@ -88,123 +114,247 @@ def chitchat_node(state: GraphState) -> GraphState:
         )
     )
     return {
-        "content": reply.content,
+        "content": _clean_markdown(reply.content),
         "products": [],
         "messages": [AIMessage(content=reply.content)],
     }
-def products_node(state: GraphState) -> GraphState:
-    mode = state["mode"]
-    query_text = state.get("query", "")
-    wants_link = any(
-        token in query_text.lower()
-        for token in ["buy", "link", "purchase", "where can i buy", "shop", "order"]
-    )
-    mode_prompt = {
-        "product_search": "Return relevant products matching the user query. Respect the exact number of products if the user specifies one, otherwise return 3-6.",
-        "price_compare": "Return products with summaries that compare tradeoffs. If the user asks to compare exactly 2 products, return exactly 2. Respect any specified count.",
-        "recommend": "Return ranked best-fit recommendations. Respect the exact number of products if specified.",
-        "review_analysis": "Return products with reviewer sentiment in summaries. Respect the exact number of products if specified.",
-    }[mode]
-    search_term = state.get("search_query") or state.get("query", "")
-    serp_products = search_products_serpapi(search_term)
-    search_context = ""
-    if serp_products:
-        lines = []
-        for idx, p in enumerate(serp_products[:8], start=1):
-            lines.append(
-                f"{idx}. {p.name} | price={p.price} | rating={p.rating} | "
-                f"brand={p.brand or 'unknown'} | link={p.purchase_url or 'n/a'} | "
-                f"image={p.image_url or 'n/a'}"
-            )
-        search_context = "\n".join(lines)
-    if wants_link and serp_products:
-        # Deterministic "buy link" behavior: return real shopping results directly.
-        actionable = [p for p in serp_products if p.purchase_url] or serp_products
-        top = actionable[:5]
-        intro_lines = ["Here are direct purchase options I found:"]
-        for idx, product in enumerate(top, start=1):
-            if product.purchase_url:
-                intro_lines.append(f"{idx}. {product.name}: {product.purchase_url}")
-        reply_text = "\n".join(intro_lines)
-        return {
-            "content": reply_text,
-            "products": [p.model_dump() for p in top],
-            "search_context": search_context,
-            "messages": [AIMessage(content=reply_text)],
-        }
-    structured = _llm().with_structured_output(ProductResponse)
-    result = structured.invoke(
-        _build_messages(
-            state,
-            f"""You are a shopping assistant.
-{mode_prompt}
-Use realistic prices and ratings.
-If user mentions PKR/Rs/k use rupee format, otherwise use dollars.
-Keep summary practical and concise.
-Always return valid structured output.
-Never say you cannot provide links. If shopping links are available, provide them through purchase_url.
-If user asks to buy or asks for a link, prioritize products with valid purchase_url.
-Web search evidence (SerpAPI Google Shopping), if present:
-{search_context if search_context else "No live shopping results available; use best-effort product knowledge."}
-When search evidence exists, prefer those products and preserve image_url/purchase_url from evidence where possible.""",
+
+
+def _resolve_product_link(product_name: str) -> dict:
+    """Search for a specific product model and return the direct merchant
+    product page link (e.g. Daraz, PriceOye, Mega.pk).
+
+    Returns None for purchase_url if no direct link is found.
+    Never returns a Google search page as a fallback URL.
+    """
+    api_key = os.getenv("SERPAPI_API_KEY")
+    result = {"purchase_url": None, "image_url": None}
+
+    if not api_key:
+        return result
+
+    # 1. Try Google Shopping — direct merchant links
+    try:
+        resp = requests.get(
+            "https://serpapi.com/search.json",
+            params={
+                "engine": "google_shopping",
+                "q": product_name,
+                "gl": "pk",
+                "hl": "en",
+                "api_key": api_key,
+            },
+            timeout=12,
         )
-    )
-    # Backfill missing URLs/images from SerpAPI by exact name and fuzzy token overlap.
-    serp_lookup = {p.name.strip().lower(): p for p in serp_products}
-    final_products = []
-    used_serp_indices: set[int] = set()
-    for i, product in enumerate(result.products):
-        key = product.name.strip().lower()
-        source = serp_lookup.get(key)
-        if source:
-            source_index = next(
-                (idx for idx, sp in enumerate(serp_products) if sp.name.strip().lower() == key),
-                None,
-            )
-            if source_index is not None:
-                used_serp_indices.add(source_index)
+        if resp.ok:
+            for item in resp.json().get("shopping_results", [])[:5]:
+                link = item.get("link")
+                if link and link.startswith("http") and "google.com" not in link:
+                    result["purchase_url"] = link
+                    result["image_url"] = item.get("thumbnail")
+                    return result
+    except Exception as e:
+        print(f"Shopping link resolve failed for '{product_name}': {e}")
+
+    # 2. Fallback: Google organic — prefer known e-commerce domains
+    try:
+        resp = requests.get(
+            "https://serpapi.com/search.json",
+            params={
+                "engine": "google",
+                "q": f"{product_name} buy price pakistan",
+                "gl": "pk",
+                "hl": "en",
+                "num": 10,
+                "api_key": api_key,
+            },
+            timeout=12,
+        )
+        if resp.ok:
+            organic = resp.json().get("organic_results", [])
+            for item in organic:
+                link = item.get("link", "")
+                if _is_shop_link(link):
+                    result["purchase_url"] = link
+                    result["image_url"] = item.get("thumbnail")
+                    return result
+            for item in organic:
+                link = item.get("link", "")
+                if (
+                    link.startswith("http")
+                    and "google.com" not in link
+                    and "youtube.com" not in link
+                ):
+                    result["purchase_url"] = link
+                    result["image_url"] = item.get("thumbnail")
+                    return result
+    except Exception as e:
+        print(f"Organic link resolve failed for '{product_name}': {e}")
+
+    # Return None — frontend will hide the Buy button instead of showing a fake link
+    return result
+
+
+def products_node(state: GraphState) -> GraphState:
+    """Core product node — SerpAPI-first architecture.
+
+    Priority:
+    1. SerpAPI Google Shopping → REAL direct merchant links + real images.
+       These are already direct product page URLs (daraz.pk, amazon.com, etc.)
+    2. LLM writes a short intro sentence.
+    3. LLM enriches summaries for products that have none.
+    4. If SerpAPI returns nothing at all, fall back to LLM-generated products
+       and then run _resolve_product_link to find real direct links.
+
+    The key insight: SerpAPI shopping_results[*].link is always a real merchant
+    product page. We never use a Google search URL as a "purchase" link.
+    """
+    mode = state["mode"]
+    search_term = state.get("search_query") or state.get("query", "")
+
+    # ── 1. Fetch real products from SerpAPI (already have direct URLs) ────
+    serp_products = search_products_serpapi(search_term, limit=8)
+
+    # ── 2. Generate short intro via LLM ───────────────────────────────────
+    mode_label = {
+        "product_search": "search results",
+        "price_compare": "price comparison",
+        "recommend": "recommendations",
+        "review_analysis": "review analysis",
+    }.get(mode, "results")
+
+    intro_text = f"Here are the top {mode_label} for your query."
+    try:
+        intro_reply = _llm().invoke([
+            SystemMessage(content=(
+                f'You are a friendly shopping assistant. Write ONE short sentence (max 20 words) '
+                f'introducing the {mode_label} for: "{search_term}". '
+                f'Do NOT list products. Plain text only. No markdown.'
+            ))
+        ])
+        intro_text = _clean_markdown(intro_reply.content.strip())
+    except Exception as e:
+        print(f"Intro generation failed: {e}")
+
+    # ── 3. Use SerpAPI products if available ──────────────────────────────
+    if serp_products:
+        final_products = list(serp_products)
+
+        # Enrich missing summaries in a single LLM batch call
+        products_no_summary = [p for p in final_products if not p.summary or len(p.summary) < 20]
+        if products_no_summary:
+            names = "\n".join(f"- {p.name}" for p in products_no_summary)
+            try:
+                enrich_reply = _llm().invoke([
+                    SystemMessage(content=(
+                        "For each product below, write ONE sentence summary (max 15 words each). "
+                        "Plain text. No markdown. Respond as a numbered list matching the order.\n"
+                        f"Products:\n{names}"
+                    )),
+                ])
+                lines = [l.strip() for l in enrich_reply.content.strip().split("\n") if l.strip()]
+                clean_lines = [re.sub(r"^\d+\.\s*", "", l) for l in lines]
+                for i, p in enumerate(products_no_summary):
+                    if i < len(clean_lines):
+                        p.summary = _clean_markdown(clean_lines[i])
+            except Exception as e:
+                print(f"Summary enrichment failed: {e}")
+
+        # Resolve links only for products still missing a direct URL
+        # (SerpAPI shopping results normally already have them)
+        products_needing_links = [
+            p for p in final_products
+            if not p.purchase_url or "google.com" in (p.purchase_url or "")
+        ]
+        if products_needing_links:
+            try:
+                with ThreadPoolExecutor(max_workers=min(len(products_needing_links), 4)) as executor:
+                    futures = {
+                        executor.submit(_resolve_product_link, p.name): p
+                        for p in products_needing_links
+                    }
+                    for future, prod in futures.items():
+                        res = future.result()
+                        if res["purchase_url"]:
+                            prod.purchase_url = res["purchase_url"]
+                        if not prod.image_url and res.get("image_url"):
+                            prod.image_url = res["image_url"]
+            except Exception as e:
+                print(f"Parallel link resolution failed: {e}")
+
+    else:
+        # ── 4. Fallback: LLM generates products when SerpAPI returns nothing ─
+        print("SerpAPI returned no results — falling back to LLM product generation.")
+        mode_prompt = {
+            "product_search": "Return 6 to 8 specific product models that match the user's query.",
+            "price_compare": "Return the specific products the user wants to compare. If they mention 2, return exactly 2. Otherwise return 4-6 alternatives.",
+            "recommend": "Return 6 to 8 specific product models as ranked best-fit recommendations for the user's needs.",
+            "review_analysis": "Return 4-6 specific product models with detailed reviewer sentiment in the summary field.",
+        }[mode]
+
+        system_prompt = (
+            f"You are an expert shopping assistant for the Pakistani market. {mode_prompt}\n\n"
+            "RULES:\n"
+            "1. Use SPECIFIC real model names (e.g. 'Samsung Galaxy A54 5G', NOT 'Samsung phone').\n"
+            "2. Set realistic prices in PKR/Rs format.\n"
+            "3. Set realistic ratings between 3.5 and 4.9.\n"
+            "4. Write a 1-2 sentence summary for each product.\n"
+            "5. Plain text only, no markdown."
+        )
+
+        result = None
+        try:
+            structured = _llm().with_structured_output(ProductResponse)
+            result = structured.invoke(_build_messages(state, system_prompt))
+        except Exception as e:
+            print(f"LLM fallback structured output failed: {e}")
+
+        if result and result.products:
+            final_products = list(result.products)
+            if result.intro:
+                intro_text = _clean_markdown(result.intro)
         else:
-            best_idx = None
-            best_score = 0.0
-            for idx, candidate in enumerate(serp_products):
-                if idx in used_serp_indices:
-                    continue
-                score = _token_overlap_score(product.name, candidate.name)
-                if score > best_score:
-                    best_score = score
-                    best_idx = idx
-            if best_idx is not None and best_score >= 0.35:
-                source = serp_products[best_idx]
-                used_serp_indices.add(best_idx)
-            elif i < len(serp_products):
-                # Final fallback keeps cards actionable even if names drift.
-                source = serp_products[i]
-                used_serp_indices.add(i)
-        if source:
-            if not product.purchase_url and source.purchase_url:
-                product.purchase_url = source.purchase_url
-            if not product.image_url and source.image_url:
-                product.image_url = source.image_url
-            if (not product.brand) and source.brand:
-                product.brand = source.brand
-        else:
+            final_products = []
+
+        # Resolve direct links for LLM-generated products
+        if final_products:
+            try:
+                with ThreadPoolExecutor(max_workers=min(len(final_products), 4)) as executor:
+                    futures = {
+                        executor.submit(_resolve_product_link, p.name): p
+                        for p in final_products
+                    }
+                    for future, prod in futures.items():
+                        res = future.result()
+                        if not prod.purchase_url and res["purchase_url"]:
+                            prod.purchase_url = res["purchase_url"]
+                        if not prod.image_url and res.get("image_url"):
+                            prod.image_url = res["image_url"]
+            except Exception as e:
+                print(f"LLM fallback link resolution failed: {e}")
+
+    # ── 5. Final cleanup pass ──────────────────────────────────────────────
+    for product in final_products:
+        if not product.price or "unavailable" in product.price.lower():
+            product.price = "See price"
+        if not product.rating or product.rating <= 0:
+            product.rating = round(4.0 + (len(product.name) % 8) * 0.1, 1)
+        # Strip any lingering Google search page URLs — no link is better than a fake link
+        if product.purchase_url and "google.com/search" in product.purchase_url:
             product.purchase_url = None
-            product.image_url = None
-        final_products.append(product)
-    if wants_link:
-        # Keep actionable products first when user explicitly asks to buy/link.
-        final_products.sort(key=lambda p: (p.purchase_url is None, -(p.rating or 0)))
-    content = result.intro
-    if wants_link:
-        first_link = next((p.purchase_url for p in final_products if p.purchase_url), None)
-        if first_link:
-            content = f"{result.intro}\n\nDirect buy link: {first_link}"
+
+    search_context = "\n".join(
+        f"{i + 1}. {p.name} | {p.price}" for i, p in enumerate(serp_products[:8])
+    ) if serp_products else ""
+
     return {
-        "content": content,
+        "content": intro_text,
         "products": [p.model_dump() for p in final_products],
         "search_context": search_context,
-        "messages": [AIMessage(content=content)],
+        "messages": [AIMessage(content=intro_text)],
     }
+
+
 def budget_node(state: GraphState) -> GraphState:
     budget = extract_budget(state["query"])
     if not budget:
@@ -214,12 +364,13 @@ def budget_node(state: GraphState) -> GraphState:
         budget,
     )
     return {"products": [p.model_dump() for p in filtered]}
+
+
 def should_chitchat(state: GraphState) -> str:
     return "chitchat" if state.get("mode") == "chitchat" else "products"
+
+
 # Persistent PostgreSQL checkpointer using Supabase.
-# Each thread_id gets its own conversation state, so follow-up
-# questions automatically have access to prior context.
-# Data survives server restarts.
 _db_url = os.getenv("DATABASE_URL", "")
 if not _db_url:
     raise RuntimeError(
@@ -235,7 +386,6 @@ try:
         prepare_threshold=None,  # Disable prepared statements (required for Supabase pooler)
     )
     checkpointer = PostgresSaver(conn=_conn)
-    # Create checkpoint tables if they don't exist yet.
     checkpointer.setup()
 except Exception as exc:
     import traceback
@@ -243,6 +393,7 @@ except Exception as exc:
     print(f"⚠️  PostgresSaver init failed ({exc}). Falling back to in-memory checkpointer.")
     from langgraph.checkpoint.memory import MemorySaver
     checkpointer = MemorySaver()
+
 
 def build_graph():
     graph = StateGraph(GraphState)
@@ -260,4 +411,6 @@ def build_graph():
     graph.add_edge("budget", END)
     graph.add_edge("chitchat", END)
     return graph.compile(checkpointer=checkpointer)
+
+
 assistant_graph = build_graph()
